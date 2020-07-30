@@ -91,8 +91,20 @@ def cmd_msbuild(
 SF_MIRROR = "http://iweb.dl.sourceforge.net"
 
 architectures = {
-    "x86": {"vcvars_arch": "x86", "msbuild_arch": "Win32"},
-    "x64": {"vcvars_arch": "x86_amd64", "msbuild_arch": "x64"},
+    "x86": {
+        "cpython_arch": "win32",
+        "boehm_arch": "NT",
+        "xz_arch": "i486",
+        "vcvars_arch": "x86",
+        "msbuild_arch": "Win32",
+    },
+    "x64": {
+        "cpython_arch": "amd64",
+        "boehm_arch": "NT_X64",
+        "xz_arch": "x86-64",
+        "vcvars_arch": "x86_amd64",
+        "msbuild_arch": "x64",
+    },
 }
 
 header = [
@@ -104,30 +116,39 @@ header = [
 
 # dependencies, listed in order of compilation
 deps = {
-    # "libjpeg": {
-    #     "url": SF_MIRROR + "/project/libjpeg-turbo/2.0.4/libjpeg-turbo-2.0.4.tar.gz",
-    #     "filename": "libjpeg-turbo-2.0.4.tar.gz",
-    #     "dir": "libjpeg-turbo-2.0.4",
-    #     "build": [
-    #         cmd_cmake(
-    #             [
-    #                 "-DENABLE_SHARED:BOOL=FALSE",
-    #                 "-DWITH_JPEG8:BOOL=TRUE",
-    #                 "-DWITH_CRT_DLL:BOOL=TRUE",
-    #             ]
-    #         ),
-    #         cmd_nmake(target="clean"),
-    #         cmd_nmake(target="jpeg-static"),
-    #         cmd_copy("jpeg-static.lib", "libjpeg.lib"),
-    #         cmd_nmake(target="cjpeg-static"),
-    #         cmd_copy("cjpeg-static.exe", "cjpeg.exe"),
-    #         cmd_nmake(target="djpeg-static"),
-    #         cmd_copy("djpeg-static.exe", "djpeg.exe"),
-    #     ],
-    #     "headers": ["j*.h"],
-    #     "libs": ["libjpeg.lib"],
-    #     "bins": ["cjpeg.exe", "djpeg.exe"],
-    # },
+    "ntwin32.mak": {
+        # ntwin32.mak is no longer distributed with Windows SDKs, needed for x64 Boehm GC
+        "url": "https://gist.github.com/ynkdir/688e62f419e5374347bf/archive/d250598ddf5129addd212b8390279a01bca12706.zip",
+        "filename": "688e62f419e5374347bf-d250598ddf5129addd212b8390279a01bca12706.zip",
+        "dir": "688e62f419e5374347bf-d250598ddf5129addd212b8390279a01bca12706",
+        "build": [
+            cmd_copy("win32.mak", "ntwin32.mak"),
+        ],
+        "headers": [r"*"],
+    },
+    "boehm": {
+        "url": "https://hboehm.info/gc/gc_source/gc-7.1.tar.gz",
+        "filename": "gc-7.1.tar.gz",
+        "dir": "gc-7.1",
+        "patch": {
+            r"misc.c": {
+                "void GC_abort(const char *msg)\n{{\n#   if defined(MSWIN32)": "void GC_abort(const char *msg)\n{{\n#   if 0",
+            },
+            r"include\private\gc_priv.h": {
+                "# ifndef abs": "#if 0",
+            },
+            r"NT_X64_THREADS_MAKEFILE": {
+                "cvarsmt": "cvarsdll",
+            },
+        },
+        "build": [
+            cmd_nmake("{boehm_arch}_THREADS_MAKEFILE", "CLEAN"),
+            cmd_nmake("{boehm_arch}_THREADS_MAKEFILE", params="nodebug=1"),
+        ],
+        "headers": [r"include\gc.h"],
+        "libs": [r"Release\gc.lib", r"gc64_dll.lib"],
+        "bins": [r"Release\gc.dll", r"gc64_dll.dll"],
+    },
     "zlib": {
         "url": "http://zlib.net/zlib1211.zip",
         "filename": "zlib1211.zip",
@@ -137,179 +158,94 @@ deps = {
             cmd_nmake(r"win32\Makefile.msc"),
         ],
         "headers": [r"z*.h"],
-        "libs": [r"z*.lib"],
-        "bins": [r"z*.dll"],
+        "libs": [r"zlib.lib"],
+        "bins": [r"zlib1.dll"],
     },
     "bz2": {
-        "url": "https://sourceware.org/pub/bzip2/bzip2-1.0.6.tar.gz",
-        "filename": "bzip2-1.0.6.tar.gz",
-        "dir": "bzip2-1.0.6",
+        "url": "https://github.com/python/cpython-source-deps/archive/bzip2-1.0.6.zip",
+        "filename": "bzip2-1.0.6.zip",
+        "dir": "cpython-source-deps-bzip2-1.0.6",
         "build": [
             cmd_nmake(r"makefile.msc", "clean"),
             cmd_nmake(r"makefile.msc"),
         ],
-        "libs": [r"libbz2.lib"],
         "headers": [r"bzlib.h"],
+        "libs": [r"libbz2.lib"],
     },
-    # sqlite3.dll (3.8.11)
-    # libexpat.lib and libexpat.dll and headers
-    "openssl": {
-        "url": "",
-        "filename": "",
-        "dir": "",
+    "sqlite3": {
+        # latest as of 2020-07-30 is 3.32.3.0
+        "url": "https://github.com/python/cpython-source-deps/archive/sqlite-3.32.3.0.zip",
+        "filename": "sqlite-3.32.3.0.zip",
+        "dir": "cpython-source-deps-sqlite-3.32.3.0",
         "build": [
-            # TODO
+            cmd_copy(r"{winbuild_dir}\sqlite3.nmake", r"makefile.msc"),
+            cmd_nmake(r"makefile.msc", "clean"),
+            cmd_nmake(r"makefile.msc"),
         ],
-
+        "headers": [r"sql*.h"],
+        "libs": [r"*.lib"],
+        "bins": [r"*.dll"],
     },
-    # "libtiff": {
-    #     "url": "https://download.osgeo.org/libtiff/tiff-4.1.0.tar.gz",
-    #     "filename": "tiff-4.1.0.tar.gz",
-    #     "dir": "tiff-4.1.0",
-    #     "build": [
-    #         cmd_copy(r"{winbuild_dir}\tiff.opt", "nmake.opt"),
-    #         cmd_nmake("makefile.vc", "clean"),
-    #         cmd_nmake("makefile.vc", "lib"),
-    #     ],
-    #     "headers": [r"libtiff\tiff*.h"],
-    #     "libs": [r"libtiff\*.lib"],
-    #     # "bins": [r"libtiff\*.dll"],
-    # },
-    # "libwebp": {
-    #     "url": "http://downloads.webmproject.org/releases/webp/libwebp-1.1.0.tar.gz",
-    #     "filename": "libwebp-1.1.0.tar.gz",
-    #     "dir": "libwebp-1.1.0",
-    #     "build": [
-    #         cmd_rmdir(r"output\release-static"),  # clean
-    #         cmd_nmake(
-    #             "Makefile.vc",
-    #             "all",
-    #             ["CFG=release-static", "OBJDIR=output", "ARCH={architecture}"],
-    #         ),
-    #         cmd_mkdir(r"{inc_dir}\webp"),
-    #         cmd_copy(r"src\webp\*.h", r"{inc_dir}\webp"),
-    #     ],
-    #     "libs": [r"output\release-static\{architecture}\lib\*.lib"],
-    # },
-    # "freetype": {
-    #     "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.10.2.tar.gz",  # noqa: E501
-    #     "filename": "freetype-2.10.2.tar.gz",
-    #     "dir": "freetype-2.10.2",
-    #     "patch": {
-    #         r"builds\windows\vc2010\freetype.vcxproj": {
-    #             # freetype setting is /MD for .dll and /MT for .lib, we need /MD
-    #             "<RuntimeLibrary>MultiThreaded</RuntimeLibrary>": "<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>",  # noqa: E501
-    #             # freetype doesn't specify SDK version, MSBuild may guess incorrectly
-    #             '<PropertyGroup Label="Globals">': '<PropertyGroup Label="Globals">\n    <WindowsTargetPlatformVersion>$(WindowsSDKVersion)</WindowsTargetPlatformVersion>',  # noqa: E501
-    #         }
-    #     },
-    #     "build": [
-    #         cmd_rmdir("objs"),
-    #         cmd_msbuild(
-    #             r"builds\windows\vc2010\freetype.sln", "Release Static", "Clean"
-    #         ),
-    #         cmd_msbuild(
-    #             r"builds\windows\vc2010\freetype.sln", "Release Static", "Build"
-    #         ),
-    #         cmd_xcopy("include", "{inc_dir}"),
-    #     ],
-    #     "libs": [r"objs\{msbuild_arch}\Release Static\freetype.lib"],
-    #     # "bins": [r"objs\{msbuild_arch}\Release\freetype.dll"],
-    # },
-    # "lcms2": {
-    #     "url": SF_MIRROR + "/project/lcms/lcms/2.11/lcms2-2.11.tar.gz",
-    #     "filename": "lcms2-2.11.tar.gz",
-    #     "dir": "lcms2-2.11",
-    #     "patch": {
-    #         r"Projects\VC2017\lcms2_static\lcms2_static.vcxproj": {
-    #             # default is /MD for x86 and /MT for x64, we need /MD always
-    #             "<RuntimeLibrary>MultiThreaded</RuntimeLibrary>": "<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>",  # noqa: E501
-    #             # retarget to default toolset (selected by vcvarsall.bat)
-    #             "<PlatformToolset>v141</PlatformToolset>": "<PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>",  # noqa: E501
-    #             # retarget to latest (selected by vcvarsall.bat)
-    #             "<WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>": "<WindowsTargetPlatformVersion>$(WindowsSDKVersion)</WindowsTargetPlatformVersion>",  # noqa: E501
-    #         }
-    #     },
-    #     "build": [
-    #         cmd_rmdir("Lib"),
-    #         cmd_rmdir(r"Projects\VC2017\Release"),
-    #         cmd_msbuild(r"Projects\VC2017\lcms2.sln", "Release", "Clean"),
-    #         cmd_msbuild(r"Projects\VC2017\lcms2.sln", "Release", "lcms2_static"),
-    #         cmd_xcopy("include", "{inc_dir}"),
-    #     ],
-    #     "libs": [r"Lib\MS\*.lib"],
-    # },
-    # "openjpeg": {
-    #     "url": "https://github.com/uclouvain/openjpeg/archive/v2.3.1.tar.gz",
-    #     "filename": "openjpeg-2.3.1.tar.gz",
-    #     "dir": "openjpeg-2.3.1",
-    #     "build": [
-    #         cmd_cmake(("-DBUILD_THIRDPARTY:BOOL=OFF", "-DBUILD_SHARED_LIBS:BOOL=OFF")),
-    #         cmd_nmake(target="clean"),
-    #         cmd_nmake(target="openjp2"),
-    #         cmd_mkdir(r"{inc_dir}\openjpeg-2.3.1"),
-    #         cmd_copy(r"src\lib\openjp2\*.h", r"{inc_dir}\openjpeg-2.3.1"),
-    #     ],
-    #     "libs": [r"bin\*.lib"],
-    # },
-    # "libimagequant": {
-    #     # e5d454b: Merge tag '2.12.6' into msvc
-    #     "url": "https://github.com/ImageOptim/libimagequant/archive/e5d454bc7f5eb63ee50c84a83a7fa5ac94f68ec4.zip",  # noqa: E501
-    #     "filename": "libimagequant-e5d454bc7f5eb63ee50c84a83a7fa5ac94f68ec4.zip",
-    #     "dir": "libimagequant-e5d454bc7f5eb63ee50c84a83a7fa5ac94f68ec4",
-    #     "patch": {
-    #         "CMakeLists.txt": {
-    #             "add_library": "add_compile_options(-openmp-)\r\nadd_library",
-    #             " SHARED": " STATIC",
-    #         }
-    #     },
-    #     "build": [
-    #         # lint: do not inline
-    #         cmd_cmake(),
-    #         cmd_nmake(target="clean"),
-    #         cmd_nmake(),
-    #     ],
-    #     "headers": [r"*.h"],
-    #     "libs": [r"*.lib"],
-    # },
-    # "harfbuzz": {
-    #     "url": "https://github.com/harfbuzz/harfbuzz/archive/2.6.8.zip",
-    #     "filename": "harfbuzz-2.6.8.zip",
-    #     "dir": "harfbuzz-2.6.8",
-    #     "build": [
-    #         cmd_cmake("-DHB_HAVE_FREETYPE:BOOL=TRUE"),
-    #         cmd_nmake(target="clean"),
-    #         cmd_nmake(target="harfbuzz"),
-    #     ],
-    #     "headers": [r"src\*.h"],
-    #     "libs": [r"*.lib"],
-    # },
-    # "fribidi": {
-    #     "url": "https://github.com/fribidi/fribidi/archive/v1.0.9.zip",
-    #     "filename": "fribidi-1.0.9.zip",
-    #     "dir": "fribidi-1.0.9",
-    #     "build": [
-    #         cmd_copy(r"{winbuild_dir}\fribidi.cmake", r"CMakeLists.txt"),
-    #         cmd_cmake(),
-    #         cmd_nmake(target="clean"),
-    #         cmd_nmake(target="fribidi"),
-    #     ],
-    #     "headers": [r"lib\*.h"],
-    #     "libs": [r"*.lib"],
-    # },
-    # "libraqm": {
-    #     "url": "https://github.com/HOST-Oman/libraqm/archive/v0.7.0.zip",
-    #     "filename": "libraqm-0.7.0.zip",
-    #     "dir": "libraqm-0.7.0",
-    #     "build": [
-    #         cmd_copy(r"{winbuild_dir}\raqm.cmake", r"CMakeLists.txt"),
-    #         cmd_cmake(),
-    #         cmd_nmake(target="clean"),
-    #         cmd_nmake(target="libraqm"),
-    #     ],
-    #     "headers": [r"src\*.h"],
-    #     "bins": [r"libraqm.dll"],
-    # },
+    "libexpat": {
+        "url": "https://github.com/libexpat/libexpat/archive/R_2_2_4.zip",
+        "filename": "R_2_2_4.zip",
+        "dir": "libexpat-R_2_2_4",
+        "patch": {
+            r"expat\lib\xmltok.c": {
+                "  const ptrdiff_t bytesStorable = toLim - *toP;\n":
+                    "  const ptrdiff_t bytesStorable = toLim - *toP;\n"
+                    "  const char * fromLimBefore;\n"
+                    "  ptrdiff_t bytesToCopy;\n",
+                "  const char * const fromLimBefore = fromLim;\n":
+                    "  fromLimBefore = fromLim;\n",
+                "  const ptrdiff_t bytesToCopy = fromLim - *fromP;\n":
+                    "  bytesToCopy = fromLim - *fromP;\n"
+            },
+        },
+        "build": [
+            cmd_cd(r"expat\lib"),
+            cmd_copy(r"{winbuild_dir}\libexpat.nmake", r"makefile.msc"),
+            cmd_nmake(r"makefile.msc", "clean"),
+            cmd_nmake(r"makefile.msc"),
+        ],
+        "headers": [r"expat.h", r"expat_external.h"],
+        "libs": [r"libexpat.lib"],
+        "bins": [r"libexpat.dll"],
+    },
+    "openssl-legacy": {
+        # use pre-built OpenSSL from CPython
+        "url": "https://github.com/python/cpython-bin-deps/archive/openssl-bin-1.0.2k.zip",
+        "filename": "openssl-bin-1.0.2k.zip",
+        "dir": "cpython-bin-deps-openssl-bin-1.0.2k",
+        "build": [
+            cmd_xcopy(r"{cpython_arch}\include", "{inc_dir}"),
+        ],
+        "libs": [r"{cpython_arch}\lib*.lib"],
+        "bins": [r"{cpython_arch}\lib*.dll"],
+    },
+    "openssl": {
+        # use pre-built OpenSSL from CPython
+        "url": "https://github.com/python/cpython-bin-deps/archive/openssl-bin-1.1.1g.tar.gz",
+        "filename": "openssl-bin-1.1.1g.tar.gz",
+        "dir": "cpython-bin-deps-openssl-bin-1.1.1g",
+        "build": [
+            cmd_xcopy(r"{cpython_arch}\include", "{inc_dir}"),
+        ],
+        "libs": [r"{cpython_arch}\lib*.lib"],
+        "bins": [r"{cpython_arch}\lib*.dll"],
+    },
+    "lzma": {
+        "url": "http://tukaani.org/xz/xz-5.0.5-windows.zip",
+        "filename": "xz-5.0.5-windows.zip",
+        "dir": "xz-5.0.5-windows",
+        "dir-create": True,
+        "build": [
+            cmd_copy(r"bin_{xz_arch}\liblzma.a", r"bin_{xz_arch}\lzma.lib"),
+            cmd_xcopy(r"include", "{inc_dir}"),
+        ],
+        "libs": [r"bin_{xz_arch}\lzma.lib"],
+        "bins": [r"bin_{xz_arch}\liblzma.dll"],
+    },
 }
 
 
@@ -377,7 +313,7 @@ def find_msvs():
     return vs
 
 
-def extract_dep(url, filename):
+def extract_dep(url, filename, dir=None):
     import urllib.request
     import tarfile
     import zipfile
@@ -398,12 +334,16 @@ def extract_dep(url, filename):
             raise RuntimeError(ex)
 
     print("Extracting " + filename)
+    if dir:
+        dir = os.path.join(build_dir, dir)
+    else:
+        dir = build_dir
     if filename.endswith(".zip"):
         with zipfile.ZipFile(file) as zf:
-            zf.extractall(build_dir)
+            zf.extractall(dir)
     elif filename.endswith(".tar.gz") or filename.endswith(".tgz"):
         with tarfile.open(file, "r:gz") as tgz:
-            tgz.extractall(build_dir)
+            tgz.extractall(dir)
     else:
         raise RuntimeError("Unknown archive type: " + filename)
 
@@ -435,7 +375,7 @@ def build_dep(name):
     dir = dep["dir"]
     file = "build_dep_{name}.cmd".format(**locals())
 
-    extract_dep(dep["url"], dep["filename"])
+    extract_dep(dep["url"], dep["filename"], dep["dir"] if dep.get("dir-create", False) else None)
 
     for patch_file, patch_list in dep.get("patch", {}).items():
         patch_file = os.path.join(build_dir, dir, patch_file.format(**prefs))
@@ -467,7 +407,7 @@ def build_dep_all():
         if dep_name in disabled:
             continue
         lines.append(r'cmd.exe /c "{{build_dir}}\{}"'.format(build_dep(dep_name)))
-        lines.append("if errorlevel 1 echo Build failed! && exit /B 1")
+        lines.append("@if errorlevel 1 @echo Build failed! && exit /B 1")
     lines.append("@echo All PyPy dependencies built successfully!")
     write_script("build_dep_all.cmd", lines)
 
@@ -480,11 +420,9 @@ if __name__ == "__main__":
     winbuild_dir = os.path.dirname(os.path.realpath(__file__))
 
     verbose = False
-    disabled = []
-    depends_dir = os.path.join(winbuild_dir, "src")
-    architecture = os.environ.get(
-        "ARCHITECTURE", "x86" if struct.calcsize("P") == 4 else "x64"
-    )
+    disabled = ["openssl-legacy"]
+    depends_dir = os.path.join(winbuild_dir, "cache")
+    architecture = "x86"
     build_dir = os.path.join(winbuild_dir, "build")
     for arg in sys.argv[1:]:
         if arg == "-v":
@@ -495,6 +433,8 @@ if __name__ == "__main__":
             architecture = arg[15:]
         elif arg.startswith("--dir="):
             build_dir = arg[6:]
+        elif arg.startswith("--openssl-legacy"):
+            disabled = ["openssl"]
         else:
             raise ValueError("Unknown parameter: " + arg)
 
