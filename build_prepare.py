@@ -95,6 +95,7 @@ architectures = {
         "cpython_arch": "win32",
         "boehm_arch": "NT",
         "xz_arch": "i486",
+        "tcl_arch": "IX86",
         "vcvars_arch": "x86",
         "msbuild_arch": "Win32",
     },
@@ -102,6 +103,7 @@ architectures = {
         "cpython_arch": "amd64",
         "boehm_arch": "NT_X64",
         "xz_arch": "x86-64",
+        "tcl_arch": "AMD64",
         "vcvars_arch": "x86_amd64",
         "msbuild_arch": "x64",
     },
@@ -246,6 +248,49 @@ deps = {
         "libs": [r"bin_{xz_arch}\lzma.lib"],
         "bins": [r"bin_{xz_arch}\liblzma.dll"],
     },
+    # Tcl/Tk are as close as I could get to CPython SVN without using SVN
+    # These are the same version, unless CPython patched theirs
+    "tcl": {
+        "url": "https://master.dl.sourceforge.net/project/tcl/Tcl/8.5.2/tcl8.5.2-src.tar.gz",
+        "filename": "tcl8.5.2-src.tar.gz",
+        "dir": "tcl8.5.2",
+        "patch": {
+            r"generic\tclPosixStr.c": {
+                # these were added as duplicates in modern MSVC, skip
+                'case EPFNOSUPPORT: return "EPFNOSUPPORT";': '/*case EPFNOSUPPORT: return "EPFNOSUPPORT";*/',
+                'case ESOCKTNOSUPPORT: return "ESOCKTNOSUPPORT";': '/*case ESOCKTNOSUPPORT: return "ESOCKTNOSUPPORT";*/',
+                'case EPFNOSUPPORT: return "protocol family not supported";': '/*case EPFNOSUPPORT: return "protocol family not supported";*/',
+                'case ESOCKTNOSUPPORT: return "socket type not supported";': '/*case ESOCKTNOSUPPORT: return "socket type not supported";*/',
+            },
+        },
+        "build": [
+            cmd_cd("win"),
+            cmd_set("COMPILERFLAGS", "-DWINVER=0x0500"),
+            cmd_set("DEBUG", "0"),
+            cmd_set("INSTALLDIR", r"{tcltk_dir}"),
+            cmd_set("MACHINE", "{tcl_arch}"),
+            cmd_nmake("makefile.vc", "clean"),
+            cmd_nmake("makefile.vc", "all"),
+            cmd_nmake("makefile.vc", "install"),
+        ],
+    },
+    "tk": {
+        "url": "https://master.dl.sourceforge.net/project/tcl/Tcl/8.5.2/tk8.5.2-src.tar.gz",
+        "filename": "tk8.5.2-src.tar.gz",
+        "dir": "tk8.5.2",
+        "build": [
+            cmd_cd("win"),
+            cmd_set("COMPILERFLAGS", "-DWINVER=0x0500"),
+            cmd_set("OPTS", "noxp"),
+            cmd_set("DEBUG", "1"),
+            cmd_set("INSTALLDIR", r"{tcltk_dir}"),
+            cmd_set("TCLDIR", r"{build_dir}\tcl8.5.2"),
+            cmd_set("MACHINE", "{tcl_arch}"),
+            cmd_nmake("makefile.vc", "clean"),
+            cmd_nmake("makefile.vc", "all"),
+            cmd_nmake("makefile.vc", "install"),
+        ],
+    },
 }
 
 
@@ -378,6 +423,8 @@ def build_dep(name):
     extract_dep(dep["url"], dep["filename"], dep["dir"] if dep.get("dir-create", False) else None)
 
     for patch_file, patch_list in dep.get("patch", {}).items():
+        if verbose:
+            print("Patching " + patch_file)
         patch_file = os.path.join(build_dir, dir, patch_file.format(**prefs))
         with open(patch_file, "r") as f:
             text = f.read()
@@ -438,6 +485,9 @@ if __name__ == "__main__":
         else:
             raise ValueError("Unknown parameter: " + arg)
 
+    # Tcl/Tk 8.5.2 are not compatible with MSVC 2017 and possibly also x64
+    disabled += ["tcl", "tk"]
+
     # dependency cache directory
     os.makedirs(depends_dir, exist_ok=True)
     print("Caching dependencies in:", depends_dir)
@@ -461,8 +511,10 @@ if __name__ == "__main__":
     # build directory for *.bin files
     bin_dir = os.path.join(build_dir, "bin")
 
+    tcltk_dir = os.path.join(build_dir, "tcltk")
+
     shutil.rmtree(build_dir, ignore_errors=True)
-    for path in [build_dir, inc_dir, lib_dir, bin_dir]:
+    for path in [build_dir, inc_dir, lib_dir, bin_dir, tcltk_dir]:
         os.makedirs(path)
 
     prefs = {
@@ -475,6 +527,7 @@ if __name__ == "__main__":
         "inc_dir": inc_dir,
         "lib_dir": lib_dir,
         "bin_dir": bin_dir,
+        "tcltk_dir": tcltk_dir,
         # Compilers / Tools
         **msvs,
         "cmake": "cmake.exe",  # TODO find CMAKE automatically
